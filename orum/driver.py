@@ -29,6 +29,9 @@ def compile_source(source: str, freestanding: bool = False,
     __orum_heap_end externs, entry symbol configurable via `entry`.
     """
     prog = Parser(Lexer(source).tokenize()).parse_program()
+    # v0.012: constant folding optimizer
+    from .optimizer import fold_constants
+    prog = fold_constants(prog)
     typecheck(prog, freestanding=freestanding)
     cg = Codegen(prog, freestanding=freestanding, entry_symbol=entry)
     (text, rodata, refs, entry_off, data, data_refs,
