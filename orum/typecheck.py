@@ -208,8 +208,10 @@ def type_name(t) -> str:
 
 
 class TypeChecker:
-    def __init__(self, freestanding: bool = False):
+    def __init__(self, freestanding: bool = False, allow_undefined: bool = False):
         self.freestanding = freestanding
+        # v0.013 phase 2: allow undefined functions (for separate compilation)
+        self.allow_undefined = allow_undefined
         self.structs: dict[str, A.StructDef] = {}
         self.functions: dict[str, tuple[list, object]] = {}
         self.var_scopes: list[dict] = [{}]  # name -> (type, mut)
@@ -917,6 +919,17 @@ class TypeChecker:
                 node.fn_ptr_name = name
                 return node.inferred
         if name not in self.functions:
+            # v0.013 phase 2: allow undefined functions in object mode
+            # (they'll be resolved at link time)
+            if self.allow_undefined:
+                # Assume u64 return, check args as u64
+                for arg in node.args:
+                    self.check_expr(arg)
+                node.inferred = A.NamedType("u64")
+                # Mark for codegen to emit relocation
+                node.builtin = "ext_call"
+                node.ext_name = name
+                return node.inferred
             raise self.err(line, f"call to undeclared function '{name}'")
         params, ret = self.functions[name]
         if len(node.args) != len(params):
@@ -1212,6 +1225,6 @@ class TypeChecker:
         return ot.inner
 
 
-def typecheck(prog: A.Program, freestanding: bool = False) -> A.Program:
+def typecheck(prog: A.Program, freestanding: bool = False, allow_undefined: bool = False) -> A.Program:
     """Run the typechecker over `prog` (in place). Returns `prog`."""
-    return TypeChecker(freestanding=freestanding).check_program(prog)
+    return TypeChecker(freestanding=freestanding, allow_undefined=allow_undefined).check_program(prog)

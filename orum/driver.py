@@ -83,6 +83,35 @@ def compile_source(source: str, freestanding: bool = False,
                          sym_relocs=sym_refs)
 
 
+def compile_object(source: str, freestanding: bool = False) -> bytes:
+    """Compile Orum source to an Orum object file (.o) for linking.
+
+    v0.013 phase 2: true separate compilation.
+    Returns object file bytes (Orum-specific format, see objfile.py).
+    """
+    from . import objfile
+    prog = Parser(Lexer(source).tokenize()).parse_program()
+    from .optimizer import fold_constants
+    prog = fold_constants(prog)
+    typecheck(prog, freestanding=freestanding, allow_undefined=True)
+    cg = Codegen(prog, freestanding=freestanding, entry_symbol="_start")
+    # Enable object mode (allow undefined functions)
+    cg.object_mode = True
+    (text, rodata, refs, entry_off, data, data_refs, sym_refs) = cg.compile()
+    
+    # Build symbol table: function names -> offsets
+    symbols = []
+    for fname, label in cg.fn_labels.items():
+        if label in cg.e.labels:
+            offset = cg.e.labels[label]
+            symbols.append((fname, offset, 0))  # 0 = func kind
+    
+    # Get relocations (undefined function calls)
+    relocs = getattr(cg, 'obj_relocs', [])
+    
+    return objfile.write_object(symbols, relocs, text, rodata)
+
+
 def build_binary(source: str, path: str, freestanding: bool = False,
                  entry: str = "_start") -> str:
     """Compile Orum source and write an executable file. Returns path."""

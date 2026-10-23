@@ -918,6 +918,21 @@ class Codegen:
             e.add_ri(RSP, 32)
             # Result already in RAX
             return
+        if builtin == "ext_call":
+            # v0.013 phase 2: call to external (undefined) function.
+            # Emit relocation for the linker.
+            # Uses System V for now (TODO: support UEFI convention)
+            for arg in node.args:
+                self.gen_expr(arg)
+                e.push_r(RAX)
+            for i in range(len(node.args) - 1, -1, -1):
+                e.pop_r(ARG_REGS[i])
+            pos = len(e.code)
+            e.code += b"\xe8\x00\x00\x00\x00"  # call rel32 (placeholder)
+            if not hasattr(self, 'obj_relocs'):
+                self.obj_relocs = []
+            self.obj_relocs.append((pos + 1, node.ext_name))
+            return
         if builtin == "list_push":
             # node.func is FieldAccess(receiver, 'push')
             self.gen_expr(node.func.obj)  # rax = list address
@@ -929,9 +944,27 @@ class Codegen:
             e.xor_rr(RAX, RAX)  # push returns unit
             return
         fname = node.func.name
+        # v0.013 phase 2: allow undefined functions (external linkage).
+        # If not defined in this module, emit a relocation.
         if fname not in self.fn_labels:
-            raise self.err(getattr(node, "line", "?"),
-                           f"call to unknown function '{fname}'")
+            if not getattr(self, 'object_mode', False):
+                raise self.err(getattr(node, "line", "?"),
+                               f"call to unknown function '{fname}'")
+            # Object mode: record as external relocation
+            # The call instruction's rel32 will be patched by the linker.
+            for arg in node.args:
+                self.gen_expr(arg)
+                e.push_r(RAX)
+            for i in range(len(node.args) - 1, -1, -1):
+                e.pop_r(ARG_REGS[i])
+            # Emit call with placeholder, record relocation
+            pos = len(e.code)
+            e.code += b"\xe8\x00\x00\x00\x00"  # call rel32 (placeholder)
+            # The rel32 is at pos+1, needs to be patched to target - (pos+5)
+            if not hasattr(self, 'obj_relocs'):
+                self.obj_relocs = []
+            self.obj_relocs.append((pos + 1, fname))
+            return
         if len(node.args) > len(ARG_REGS):
             raise self.err(getattr(node, "line", "?"),
                            "v0.001: at most 6 call arguments")
