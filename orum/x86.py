@@ -348,6 +348,12 @@ class Emitter:
         self.code += b"\xe8"
         self._rel32(label)
 
+    def call_reg(self, reg: int):
+        # v0.011: `call r64` — FF /2
+        self.code += self._rex_w(b=(reg >> 3) & 1)
+        self.code += b"\xff"
+        self.code += self._modrm(0b11, 0b010, reg & 7)
+
     def ret(self):
         self.code += b"\xc3"
 

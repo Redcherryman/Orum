@@ -897,6 +897,25 @@ class TypeChecker:
             return self.check_addr(node, expected, line)
         if name in ("ok", "err"):
             return self.check_ok_err(node, name, expected, line)
+        # v0.011: function pointer call — variable with FnType
+        var_info = self.lookup_var(name)
+        if var_info is not None:
+            vtype, _ = var_info
+            if isinstance(vtype, A.FnType):
+                # Check args against FnType params
+                if len(node.args) != len(vtype.params):
+                    raise self.err(
+                        line,
+                        f"function pointer takes {len(vtype.params)} argument(s), "
+                        f"got {len(node.args)}",
+                    )
+                for ptype, arg in zip(vtype.params, node.args):
+                    at = self.check_expr(arg, expected=ptype)
+                    # TODO: type compatibility check
+                node.inferred = vtype.ret
+                node.builtin = "fn_ptr_call"
+                node.fn_ptr_name = name
+                return node.inferred
         if name not in self.functions:
             raise self.err(line, f"call to undeclared function '{name}'")
         params, ret = self.functions[name]
@@ -996,6 +1015,9 @@ class TypeChecker:
         address. The element type comes from the expected type, so the
         call site must be annotated: `p: raw *u32 = rawptr(0xF000)`.
 
+        v0.011: also accepts `fn` types for function pointers:
+        `f: fn(u64) -> u64 = rawptr(0x1000)`.
+
         This is deliberately explicit and dangerous-looking: converting
         an integer to a pointer is exactly the kind of thing Orum wants
         visible. On hosted builds the address must be valid (real MMIO
@@ -1008,9 +1030,9 @@ class TypeChecker:
                 line, f"'rawptr' needs an integer address, "
                 f"got {type_name(at)}"
             )
-        if not isinstance(expected, A.RawType):
+        if not isinstance(expected, (A.RawType, A.FnType)):
             raise self.err(
-                line, "'rawptr' needs a `raw *T` annotation at the "
+                line, "'rawptr' needs a `raw *T` or `fn` annotation at the "
                 "call site, e.g. `p: raw *u32 = rawptr(0xF000)`"
             )
         node.inferred = expected

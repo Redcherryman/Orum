@@ -29,7 +29,7 @@ from .typecheck import (
     type_name,
 )
 from .x86 import (
-    Emitter, RAX, RBX, RCX, RDX, RDI, RSI, RBP, RSP, R8, R10,
+    Emitter, RAX, RBX, RCX, RDX, RDI, RSI, RBP, RSP, R8, R9, R10, R11,
     R12, R13, R14, R15,
     CC_E, CC_NE, CC_B, CC_AE, CC_BE, CC_A, CC_L, CC_GE, CC_LE, CC_G,
     ARG_REGS,
@@ -178,6 +178,9 @@ class Codegen:
             # unknown names were already rejected by the typechecker
             return
         if isinstance(t, A.RawType):
+            return
+        if isinstance(t, A.FnType):
+            # v0.011: function pointers are word-sized addresses
             return
         if isinstance(t, A.ListType):
             el = t.elem
@@ -891,6 +894,29 @@ class Codegen:
             # v0.009: `addr(var)` — LEA of a local's stack slot.
             info = self.cur_vars[node.addr_var]
             self.e.lea(RAX, RBP, -info.off)
+            return
+        if builtin == "fn_ptr_call":
+            # v0.011: call through function pointer variable.
+            # Uses MS x64 convention (for UEFI). The pointer is in a local var.
+            # Args: up to 4, passed in RCX, RDX, R8, R9.
+            # TODO: support more than 4 args, System V convention for Orum-to-Orum.
+            info = self.cur_vars[node.fn_ptr_name]
+            # Load fn pointer into R11 (caller-saved, safe)
+            e.mov_rm(R11, RBP, -info.off)
+            # Evaluate args and place in MS x64 registers
+            # Arg1 -> RCX, Arg2 -> RDX, Arg3 -> R8, Arg4 -> R9
+            arg_regs = [RCX, RDX, R8, R9]
+            for i, arg in enumerate(node.args):
+                if i >= 4:
+                    raise self.err(getattr(node, "line", "?"),
+                                   "function pointer call supports max 4 args")
+                self.gen_expr(arg)
+                e.mov_rr(arg_regs[i], RAX)
+            # 32-byte shadow space, call, cleanup
+            e.sub_ri(RSP, 32)
+            e.call_reg(R11)
+            e.add_ri(RSP, 32)
+            # Result already in RAX
             return
         if builtin == "list_push":
             # node.func is FieldAccess(receiver, 'push')
