@@ -872,6 +872,11 @@ class Codegen:
             # address expression; it stays in rax as the pointer value.
             self.gen_expr(node.args[0])
             return
+        if builtin == "addr":
+            # v0.009: `addr(var)` — LEA of a local's stack slot.
+            info = self.cur_vars[node.addr_var]
+            self.e.lea(RAX, RBP, -info.off)
+            return
         if builtin == "list_push":
             # node.func is FieldAccess(receiver, 'push')
             self.gen_expr(node.func.obj)  # rax = list address

@@ -860,6 +860,8 @@ class TypeChecker:
             return self.check_len(node, line)
         if name == "rawptr":
             return self.check_rawptr(node, expected, line)
+        if name == "addr":
+            return self.check_addr(node, expected, line)
         if name in ("ok", "err"):
             return self.check_ok_err(node, name, expected, line)
         if name not in self.functions:
@@ -980,6 +982,31 @@ class TypeChecker:
             )
         node.inferred = expected
         node.builtin = "rawptr"
+        return node.inferred
+
+    def check_addr(self, node: A.Call, expected, line):
+        """`addr(var)` — v0.009: address of a local variable as `raw *T`.
+        For FFI OUT parameters (e.g. UEFI LocateProtocol's `&gop`).
+        The variable must be a `mut` local; the result needs a `raw *T`
+        annotation, e.g. `p: raw *u64 = addr(gop)`."""
+        if len(node.args) != 1:
+            raise self.err(line, "'addr' takes exactly 1 argument")
+        arg = node.args[0]
+        if not isinstance(arg, A.Var):
+            raise self.err(
+                line, f"'addr' needs a variable name, got {type(arg).__name__}"
+            )
+        found = self.lookup_var(arg.name)
+        if found is None:
+            raise self.err(line, f"'addr' of undeclared variable '{arg.name}'")
+        if not isinstance(expected, A.RawType):
+            raise self.err(
+                line, "'addr' needs a `raw *T` annotation at the "
+                "call site, e.g. `p: raw *u64 = addr(gop)`"
+            )
+        node.inferred = expected
+        node.builtin = "addr"
+        node.addr_var = arg.name
         return node.inferred
 
     def check_say(self, node: A.Call, line):
