@@ -1,0 +1,39 @@
+# for_in_list.orum — Orum v0.003 example
+# `for x in list`: x is a fresh immutable binding per iteration.
+# Nested loops, strings with interpolation, bools.
+
+mut words = list[str]()
+words.push("alpha")
+words.push("beta")
+words.push("gamma")
+for w in words
+say("word=$w")
+end
+
+mut flags = list[bool]()
+flags.push(1 == 1)
+flags.push(1 == 2)
+for f in flags
+say("flag=$f")
+end
+
+mut grid = list[int]()
+mut i = 0
+while i < 4
+grid.push(i)
+i = i + 1
+end
+mut pairs = 0
+for a in grid
+for b in grid
+pairs = pairs + 1
+end
+end
+say("pairs=$pairs")
+
+# the classic int range still works alongside
+mut s = 0
+for k in 5
+s = s + k
+end
+say("sum0to4=$s")

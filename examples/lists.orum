@@ -1,0 +1,37 @@
+# lists.orum — Orum v0.002 example
+# Growable lists: construction, push, index, len, say.
+
+mut squares = list[int]()
+mut i = 0
+while i < 10
+squares.push(i * i)
+i = i + 1
+end
+
+say(squares)
+n = len(squares)
+first = squares[0]
+last = squares[9]
+say("len=$n")
+say("first=$first last=$last")
+
+squares[0] = 100
+say(squares)
+
+mut words = list[str]()
+words.push("hello")
+words.push("orum")
+say(words)
+
+mut flags = list[bool]()
+flags.push(1 == 1)
+flags.push(1 == 2)
+say(flags)
+
+# handles copy: both names see the same elements
+mut alias = squares
+alias.push(999)
+an = len(alias)
+sn = len(squares)
+say("alias len=$an squares len=$sn")
+say(squares[10])

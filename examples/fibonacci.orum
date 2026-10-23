@@ -1,0 +1,24 @@
+# fibonacci.orum — Orum v0.001 example
+# Iterative Fibonacci with if/else, while, and reassignment.
+
+fn fib(n: int) -> int
+if n < 2
+return n
+end
+mut a = 0
+mut b = 1
+mut i = 2
+while i <= n
+mut c = a + b
+a = b
+b = c
+i = i + 1
+end
+return b
+end
+
+mut k = 0
+while k < 10
+say(fib(k))
+k = k + 1
+end

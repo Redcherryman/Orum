@@ -1,0 +1,22 @@
+# asm_rdtsc.orum — Orum v0.005 example
+# Inline asm: read the CPU timestamp counter with raw machine bytes.
+# There is no assembler in Orum's pipeline — `raw` bytes go out verbatim.
+
+fn rdtsc() -> u64
+mut lo: u64 = 0
+mut hi: u64 = 0
+asm
+out lo = eax
+out hi = edx
+raw 0x0F, 0x31
+end
+return (hi << 32) | lo
+end
+
+mut a = rdtsc()
+mut b = rdtsc()
+say(a)
+say(b)
+if b > a
+say("tsc increasing")
+end

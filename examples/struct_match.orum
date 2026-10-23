@@ -1,0 +1,20 @@
+# struct_match.orum — Orum v0.001 example
+# Structs, error-as-value unions, and match with ok/err arms.
+
+struct Point
+x: int
+y: int
+end
+
+fn load_point(source: str) -> Point | str
+if source == "ok"
+return Point(x: 10, y: 20)
+else
+return "bad source"
+end
+end
+
+match load_point("nope")
+ok(p) -> say(p)
+err(e) -> crash e
+end

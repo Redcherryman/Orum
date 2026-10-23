@@ -1,0 +1,12 @@
+# kmain.orum — Orum v0.001 example
+# Bare-metal flavor: paint a framebuffer through a raw pointer.
+# `fb` is exempt from the normal memory rules — the danger is
+# visible right in the type signature.
+
+fn kmain(fb: raw *u32, pixels: int)
+mut i = 0
+while i < pixels
+fb[i] = 0x1a0505
+i = i + 1
+end
+end

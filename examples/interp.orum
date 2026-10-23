@@ -1,0 +1,27 @@
+# interp.orum — Orum v0.002 example
+# Runtime string interpolation: the ONLY way to build strings from values.
+
+name = "myriad"
+version = 2
+stable = 1 == 1
+beta = 1 == 2
+
+say("hello $name")
+say("$name v$version — stable=$stable beta=$beta")
+
+mut count = 0
+while count < 3
+count = count + 1
+say("iteration $count of 3")
+end
+
+neg = 0 - 17
+say("neg=$neg")
+
+# interpolation inside functions, mixed with plain strings
+fn greet(who: str, n: int) -> str
+return "hi $who, you are visitor $n"
+end
+
+say(greet("aiden", 1))
+say(greet("orum", 2))

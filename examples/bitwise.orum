@@ -1,0 +1,30 @@
+# bitwise.orum — Orum v0.004 example
+# Bitwise operators: & | ^ << >> (binary) and ~ (unary).
+# Precedence is C-like: << >> bind tighter than & ^ |, but looser
+# than + -. Note the C gotcha: `a & mask == 0` parses as
+# `a & (mask == 0)` — parenthesize your masks.
+
+say(0xF0 & 0x3C)      # 48
+say(0xF0 | 0x3C)      # 252
+say(0xFF ^ 0x3C)      # 195
+say(~0)               # -1 (all 64 bits set)
+say(~0xFF)            # -256
+
+say(1 << 10)          # 1024
+say(1024 >> 3)        # 128
+say(1 << 2 + 3)       # 32 — additive binds tighter than shift
+say(2 * 3 << 2)       # 24 — multiplicative binds tighter still
+
+# >> follows signedness: arithmetic (sar) on signed, logical (shr)
+# on unsigned.
+neg = 0 - 8
+say(neg >> 2)         # -2 (arithmetic: sign bit propagates)
+x: u64 = 0x8000000000000000
+say(x >> 1)           # 4611686018427387904 (logical: zero fills)
+
+# masking a device register the kernel way
+mut reg = 0xDEADBEEF
+reg = reg & ~0xFF     # clear low byte: 0xDEADBE00
+say(reg & 0xFFFFFFFF) # 3735928320
+reg = reg | 0x42      # set bits: 0xDEADBE42
+say(reg)

@@ -1,0 +1,32 @@
+# kernel_min.orum — Orum v0.006 example
+# A minimal freestanding "kernel": no hosted builtins, no syscalls.
+#
+# COMPILE WITH: orumc kernel_min.orum --freestanding --entry kmain
+# COMPILE-ONLY: the output needs a link step resolving
+# __orum_heap_start / __orum_heap_end before it can boot. Do not run
+# the unlinked binary on Linux.
+#
+# What this proves: volatile raw pointers, inline asm (cli), and
+# bitwise ops all work in freestanding mode, and the binary contains
+# zero syscall bytes.
+
+# framebuffer base would come from the bootloader; scratch for now
+fb: raw *u32 = rawptr(0xB8000)
+
+# paint 80x25 cells with attribute byte via bitwise ops
+mut i = 0
+while i < 2000
+cell: u32 = (0x1F << 8) | 0x20   # white-on-blue space
+fb[i] = cell
+i = i + 1
+end
+
+# mark the first cell with a magic pattern (volatile readback)
+*fb = 0x1F4B1F4B
+mut check = *fb
+mut ok = (check & 0xFFFF) == 0x1F4B
+
+# disable interrupts before halting (entry falls through to cli;hlt)
+asm
+raw 0xFA
+end

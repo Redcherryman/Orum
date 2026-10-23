@@ -1,0 +1,25 @@
+# mut_params.orum — Orum v0.003 example
+# `mut` function parameters: the caller hands over a `mut` list and
+# sees the callee's pushes, because the handle aliases the object.
+
+fn fill(mut l: list[int], v: int)
+mut i = 0
+while i < 3
+l.push(v + i)
+i = i + 1
+end
+end
+
+fn total(l: list[int]) -> int
+mut t = 0
+for x in l
+t = t + x
+end
+return t
+end
+
+mut nums = list[int]()
+fill(nums, 10)
+say(nums)
+t = total(nums)
+say("total=$t")

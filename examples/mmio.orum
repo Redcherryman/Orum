@@ -1,0 +1,31 @@
+# mmio.orum — Orum v0.004 example
+# Write a pattern through a `raw *u32` to a scratch address in a loop.
+#
+# COMPILE-ONLY on Linux: the scratch address below is not valid user
+# memory, so DO NOT RUN this binary. Real MMIO addresses arrive with
+# freestanding mode (a later version), where there is no OS to fault.
+#
+# What this proves: `rawptr` materializes a raw pointer from an integer,
+# `p[i] = v` stores through it, `*p` dereferences it — and every access
+# is volatile (the compiler emits one load/store per source access,
+# never elided, merged, or reordered).
+
+p: raw *u32 = rawptr(0xF00000)
+
+# paint 16 registers with a walking pattern
+mut i = 0
+while i < 16
+p[i] = i * 0x11111111
+i = i + 1
+end
+
+# single-register write via dereference
+*p = 0xDEADBEEF
+
+# readback through the pointer
+mut acc = 0
+mut j = 0
+while j < 16
+acc = acc ^ p[j]
+j = j + 1
+end
