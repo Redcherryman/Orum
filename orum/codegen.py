@@ -758,6 +758,21 @@ class Codegen:
             self.gen_call(node)
         elif isinstance(node, A.ListNew):
             self.gen_list_new(node)
+        elif isinstance(node, A.ArrayLit):
+            # Array literal: emit bytes to rodata, return address in RAX.
+            # v0.010: only integer literals supported (for font data, etc.)
+            # Each element must fit in a byte (u8).
+            data = bytearray()
+            for elem in node.elems:
+                if not isinstance(elem, A.IntLit):
+                    raise self.err(getattr(node, "line", "?"),
+                                   "array literal elements must be integer literals")
+                v = elem.value
+                if not 0 <= v <= 255:
+                    raise self.err(getattr(node, "line", "?"),
+                                   f"array literal byte out of range: {v}")
+                data.append(v)
+            self.rodata_addr(RAX, bytes(data))
         elif isinstance(node, A.StructLit):
             self.gen_struct_lit(node)
         elif isinstance(node, A.FieldAccess):

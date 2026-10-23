@@ -220,6 +220,12 @@ class ListNew:
 
 
 @dataclass
+class ArrayLit:
+    """`[1, 2, 3]` — fixed-size array literal, type `array[T, N]`."""
+    elems: list  # list of expr nodes
+
+
+@dataclass
 class Var:
     name: str
 

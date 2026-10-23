@@ -637,6 +637,17 @@ class Parser:
             expr = self.parse_expr()
             self.expect("RPAREN")
             return expr
+        if t.type == "LBRACKET":
+            # Array literal: `[1, 2, 3]`
+            self.advance()
+            elems = []
+            if self.peek().type != "RBRACKET":
+                elems.append(self.parse_expr())
+                while self.peek().type == "COMMA":
+                    self.advance()
+                    elems.append(self.parse_expr())
+            self.expect("RBRACKET")
+            return A.ArrayLit(elems)
         raise ParseError(
             f"{t.line}:{t.col}: unexpected '{t.type.lower()}' "
             f"({t.value!r}) in expression"

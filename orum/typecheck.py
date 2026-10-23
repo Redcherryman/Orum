@@ -691,6 +691,26 @@ class TypeChecker:
                 raise self.err(line, f"undeclared name '{node.name}'")
             node.inferred = found[0]
             return node.inferred
+        if isinstance(node, A.ArrayLit):
+            # `[1, 2, 3]` — byte array literal. All elements must be
+            # integer literals in 0..255. Decays to `raw *u8` (pointer
+            # to rodata), like C array decay.
+            line = getattr(node, "line", "?")
+            if not node.elems:
+                raise self.err(line, "empty array literal not allowed")
+            for e in node.elems:
+                if not isinstance(e, A.IntLit):
+                    raise self.err(
+                        line,
+                        "array literal elements must be integer literals",
+                    )
+                if not 0 <= e.value <= 255:
+                    raise self.err(
+                        line,
+                        f"array literal byte out of range: {e.value}",
+                    )
+            node.inferred = A.RawType(A.NamedType("u8"))
+            return node.inferred
         if isinstance(node, A.BinOp):
             return self.check_binop(node)
         if isinstance(node, A.UnaryOp):
@@ -775,6 +795,19 @@ class TypeChecker:
                     "`+` on strings is not allowed; interpolation "
                     '`"hi $name"` is the only way to build strings',
                 )
+            # v0.010: pointer arithmetic — `raw *T + int` or `int + raw *T`
+            if isinstance(lt, A.RawType) and is_int_like(rt):
+                node.inferred = lt
+                return node.inferred
+            if isinstance(rt, A.RawType) and is_int_like(lt):
+                node.inferred = rt
+                return node.inferred
+        if op == "-":
+            # v0.010: `raw *T - int` -> `raw *T`
+            # (pointer-pointer subtraction not supported yet)
+            if isinstance(lt, A.RawType) and is_int_like(rt):
+                node.inferred = lt
+                return node.inferred
         if op in ("+", "-", "*", "/", "%"):
             if not (is_int_like(lt) and is_int_like(rt)):
                 raise self.err(
@@ -985,10 +1018,10 @@ class TypeChecker:
         return node.inferred
 
     def check_addr(self, node: A.Call, expected, line):
-        """`addr(var)` — v0.009: address of a local variable as `raw *T`.
+        """`addr(var)` — v0.009: address of a local variable as u64.
         For FFI OUT parameters (e.g. UEFI LocateProtocol's `&gop`).
-        The variable must be a `mut` local; the result needs a `raw *T`
-        annotation, e.g. `p: raw *u64 = addr(gop)`."""
+        Returns the address as a plain u64; use `rawptr()` to get a
+        typed `raw *T` if needed."""
         if len(node.args) != 1:
             raise self.err(line, "'addr' takes exactly 1 argument")
         arg = node.args[0]
@@ -999,12 +1032,7 @@ class TypeChecker:
         found = self.lookup_var(arg.name)
         if found is None:
             raise self.err(line, f"'addr' of undeclared variable '{arg.name}'")
-        if not isinstance(expected, A.RawType):
-            raise self.err(
-                line, "'addr' needs a `raw *T` annotation at the "
-                "call site, e.g. `p: raw *u64 = addr(gop)`"
-            )
-        node.inferred = expected
+        node.inferred = A.NamedType("u64")
         node.builtin = "addr"
         node.addr_var = arg.name
         return node.inferred
