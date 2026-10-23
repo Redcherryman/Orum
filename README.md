@@ -1,3 +1,4 @@
+<img width="1254" height="1254" alt="31636_0_aws9" src="https://github.com/user-attachments/assets/df48a309-10b1-4de4-8763-33c95879e59b" />
 # Orum
 
 Orum is an original programming language within the Myriad OS ecosystem. This repository is dedicated exclusively to the Orum language, including its language specification, compiler, tooling, standard library, tests, and documentation.
