@@ -48,6 +48,16 @@ INT_RANGES = {
 
 UNIT = A.NamedType("unit")  # internal: result of `say`, `exit`
 
+# Primitive byte sizes (mirrors codegen.ELEM_SIZE; kept here so typecheck
+# stays independent of codegen). Used by sizeof/offsetof.
+PRIMITIVE_SIZE = {
+    "i8": 1, "u8": 1,
+    "i16": 2, "u16": 2,
+    "i32": 4, "u32": 4, "f32": 4,
+    "i64": 8, "u64": 8, "int": 8, "f64": 8,
+    "bool": 1,
+}
+
 
 # -- inline asm (v0.005) ---------------------------------------------------
 # Register numbers follow orum.x86: rax=0 rcx=1 rdx=2 rbx=3 rsp=4 rbp=5
@@ -903,6 +913,10 @@ class TypeChecker:
             return self.check_fseek(node, line)
         if name == "heap_alloc":
             return self.check_heap_alloc(node, line)
+        if name == "sizeof":
+            return self.check_sizeof(node, line)
+        if name == "offsetof":
+            return self.check_offsetof(node, line)
         if name == "len":
             return self.check_len(node, line)
         if name == "rawptr":
@@ -1083,6 +1097,98 @@ class TypeChecker:
         node.builtin = "addr"
         node.addr_var = arg.name
         return node.inferred
+
+    def layout_size(self, t) -> int:
+        """Bytes a value of type t occupies inside a struct (word-granular,
+        matching codegen's layout: every field is a whole number of words).
+        Primitive fields take a full word even when the type is narrower."""
+        if isinstance(t, A.NamedType):
+            if t.name in PRIMITIVE_SIZE:
+                return 8
+            if t.name in self.structs:
+                sdef = self.structs[t.name]
+                total = 0
+                for f in sdef.fields:
+                    total += self.layout_size(f.type)
+                return total
+            return 8
+        if isinstance(t, A.UnionType):
+            return 16
+        if isinstance(t, (A.ListType, A.RawType, A.FnType)):
+            return 8
+        if isinstance(t, A.ArrayType):
+            return self.layout_size(t.elem) * t.size
+        return 8
+
+    def type_byte_size(self, t) -> int:
+        """True byte size of a value of type t. Primitives use their real
+        width; structs use their layout size (sum of word-granular fields)."""
+        if isinstance(t, A.NamedType):
+            if t.name in PRIMITIVE_SIZE:
+                return PRIMITIVE_SIZE[t.name]
+            if t.name in self.structs:
+                return self.layout_size(t)
+            return 8
+        if isinstance(t, A.UnionType):
+            return 16
+        if isinstance(t, (A.ListType, A.RawType, A.FnType)):
+            return 8
+        if isinstance(t, A.ArrayType):
+            return self.type_byte_size(t.elem) * t.size
+        return 8
+
+    def check_sizeof(self, node: A.Call, line):
+        """`sizeof(T)` or `sizeof(x)` — compile-time byte size as u64.
+        T may be a type name (struct or primitive) or x a value; the size
+        is computed here and emitted as a constant by codegen."""
+        if len(node.args) != 1:
+            raise self.err(line, "'sizeof' takes exactly 1 argument")
+        arg = node.args[0]
+        if isinstance(arg, A.Var):
+            if arg.name in self.structs or arg.name in PRIMITIVE_SIZE:
+                size = self.type_byte_size(A.NamedType(arg.name))
+            else:
+                found = self.lookup_var(arg.name)
+                if found is None:
+                    raise self.err(
+                        line, f"'sizeof' of undeclared name '{arg.name}'"
+                    )
+                vtype, _ = found
+                size = self.type_byte_size(vtype)
+        else:
+            at = self.check_expr(arg)
+            size = self.type_byte_size(at)
+        node.inferred = A.NamedType("u64")
+        node.builtin = "sizeof"
+        node.const_value = size
+        return node.inferred
+
+    def check_offsetof(self, node: A.Call, line):
+        """`offsetof(Struct, field)` — byte offset of field in Struct's
+        word-granular layout, as u64. Both args are names, not values."""
+        if len(node.args) != 2:
+            raise self.err(line, "'offsetof' takes exactly 2 arguments")
+        tname, fname = node.args
+        if not isinstance(tname, A.Var) or tname.name not in self.structs:
+            raise self.err(
+                line, "'offsetof' needs a struct type name as its first argument"
+            )
+        if not isinstance(fname, A.Var):
+            raise self.err(
+                line, "'offsetof' needs a field name as its second argument"
+            )
+        sdef = self.structs[tname.name]
+        off = 0
+        for f in sdef.fields:
+            if f.name == fname.name:
+                node.inferred = A.NamedType("u64")
+                node.builtin = "offsetof"
+                node.const_value = off
+                return node.inferred
+            off += self.layout_size(f.type)
+        raise self.err(
+            line, f"struct '{tname.name}' has no field '{fname.name}'"
+        )
 
     def check_say(self, node: A.Call, line):
         if self.freestanding:

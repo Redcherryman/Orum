@@ -970,6 +970,10 @@ class Codegen:
             info = self.cur_vars[node.addr_var]
             self.e.lea(RAX, RBP, -info.off)
             return
+        if builtin in ("sizeof", "offsetof"):
+            # v0.016: compile-time constants computed by typecheck.
+            e.mov_ri64(RAX, node.const_value)
+            return
         if builtin == "fn_ptr_call":
             # v0.011: call through function pointer variable.
             # Uses MS x64 convention (for UEFI). The pointer is in a local var.

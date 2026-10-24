@@ -12,6 +12,7 @@ v0.013: separate compilation phase 1 — `take` imports via file inclusion.
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 import stat
 
@@ -22,23 +23,70 @@ from .lexer import Lexer
 from .parser import Parser
 
 
-def resolve_takes(prog: A.Program, base_dir: str, seen: set = None,
+def _decl_name(stmt) -> str | None:
+    """Declaration name for top-level named statements, else None."""
+    if isinstance(stmt, (A.FnDef, A.StructDef, A.Binding, A.Share)):
+        return stmt.name
+    return None
+
+
+def _collect_refs(node, out: set):
+    """Collect identifier references from an AST node (Var names, type
+    names, struct literal names). Generic walk over dataclass fields."""
+    if node is None:
+        return
+    if isinstance(node, A.Var):
+        out.add(node.name)
+        return
+    if isinstance(node, A.NamedType):
+        out.add(node.name)
+        return
+    if isinstance(node, A.StructLit):
+        out.add(node.name)
+    if dataclasses.is_dataclass(node) and not isinstance(node, type):
+        for f in dataclasses.fields(node):
+            _collect_refs(getattr(node, f.name), out)
+        return
+    if isinstance(node, (list, tuple)):
+        for item in node:
+            _collect_refs(item, out)
+
+
+def _decl_refs(stmt) -> set:
+    """Names a declaration references (body, value, fields, signature)."""
+    refs: set = set()
+    if isinstance(stmt, A.FnDef):
+        for p in stmt.params:
+            _collect_refs(p.type, refs)
+        _collect_refs(stmt.ret, refs)
+        for s in stmt.body:
+            _collect_refs(s, refs)
+    elif isinstance(stmt, A.StructDef):
+        for f in stmt.fields:
+            _collect_refs(f.type, refs)
+    elif isinstance(stmt, A.Binding):
+        _collect_refs(stmt.type, refs)
+        _collect_refs(stmt.value, refs)
+    elif isinstance(stmt, A.Share):
+        _collect_refs(stmt.value, refs)
+    return refs
+
+
+def resolve_takes(prog: A.Program, base_dir: str, seen: dict = None,
                   stack: list = None) -> A.Program:
     """Resolve `take x from mod.path` imports by loading module files.
 
-    v0.013 phase 1: file inclusion (not true .o linking yet).
-    For `take x from foo.bar`, loads `foo/bar.orum` relative to base_dir,
-    parses it, and prepends its statements (excluding `take`s, which are
-    resolved recursively). The `x` names are not filtered yet — whole
-    module is included (like C #include).
-
-    v0.015: import cycles are REPORTED, not silently skipped. `seen`
-    tracks fully-loaded modules (diamond imports skip safely); `stack`
-    tracks modules currently being loaded — a take of a file on the
-    stack is a cycle and raises an error.
+    v0.016: takes are FILTERED, not whole-module inclusion. For
+    `take x from foo.bar`, loads `foo/bar.orum` relative to base_dir and
+    includes only x plus the declarations x transitively references
+    (within that module). A module's own `take`s are resolved recursively
+    first, so cross-module dependencies still arrive. Diamond imports
+    (two files taking different names from one module) include each
+    declaration once: `seen` maps module path -> included decl names.
+    Taking a name the module does not declare is an error.
     """
     if seen is None:
-        seen = set()
+        seen = {}
     if stack is None:
         stack = []
     new_stmts = []
@@ -49,24 +97,48 @@ def resolve_takes(prog: A.Program, base_dir: str, seen: set = None,
             if mod_path in stack:
                 cycle = " -> ".join(stack + [mod_path])
                 raise ValueError(f"import cycle detected: {cycle}")
-            if mod_path in seen:
-                continue  # already fully loaded (diamond import), skip
             if not os.path.exists(mod_path):
                 raise FileNotFoundError(f"module not found: {mod_path} (for `take` from {stmt.module})")
-            seen.add(mod_path)
             stack.append(mod_path)
             try:
                 with open(mod_path) as f:
                     mod_source = f.read()
                 mod_prog = Parser(Lexer(mod_source).tokenize()).parse_program()
-                # Recursively resolve takes in the module
-                mod_prog = resolve_takes(mod_prog, base_dir, seen, stack)
+                mod_takes = [s for s in mod_prog.statements if isinstance(s, A.Take)]
+                mod_own = [s for s in mod_prog.statements if not isinstance(s, A.Take)]
+                # Resolve the module's own takes first (deps before dependents).
+                if mod_takes:
+                    dep_prog = A.Program(statements=mod_takes)
+                    dep_prog = resolve_takes(dep_prog, base_dir, seen, stack)
+                    new_stmts.extend(dep_prog.statements)
+                # Filter the module's own declarations to the taken names
+                # plus their transitive dependencies within this module.
+                own_decls = {}
+                for s in mod_own:
+                    n = _decl_name(s)
+                    if n is not None:
+                        own_decls[n] = s
+                for name in stmt.names:
+                    if name not in own_decls:
+                        raise ValueError(
+                            f"module {'.'.join(stmt.module)} does not define '{name}'"
+                        )
+                closure = set(stmt.names)
+                work = list(stmt.names)
+                while work:
+                    cur = work.pop()
+                    for ref in _decl_refs(own_decls[cur]):
+                        if ref in own_decls and ref not in closure:
+                            closure.add(ref)
+                            work.append(ref)
+                already = seen.setdefault(mod_path, set())
+                for s in mod_own:
+                    n = _decl_name(s)
+                    if n is not None and n in closure and n not in already:
+                        new_stmts.append(s)
+                        already.add(n)
             finally:
                 stack.pop()
-            # Prepend the module's statements (excluding its takes, already resolved)
-            for ms in mod_prog.statements:
-                if not isinstance(ms, A.Take):
-                    new_stmts.append(ms)
         else:
             new_stmts.append(stmt)
     prog.statements = new_stmts

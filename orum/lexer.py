@@ -12,7 +12,7 @@ from typing import Any
 
 
 KEYWORDS = {
-    "fn", "return", "mut", "const", "if", "else", "while", "for", "in",
+    "fn", "return", "mut", "if", "else", "while", "for", "in",
     "match", "struct", "share", "take", "from", "crash", "end", "raw",
     "asm", "out", "clobber",
 }
