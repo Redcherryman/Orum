@@ -22,7 +22,8 @@ from .lexer import Lexer
 from .parser import Parser
 
 
-def resolve_takes(prog: A.Program, base_dir: str, seen: set = None) -> A.Program:
+def resolve_takes(prog: A.Program, base_dir: str, seen: set = None,
+                  stack: list = None) -> A.Program:
     """Resolve `take x from mod.path` imports by loading module files.
 
     v0.013 phase 1: file inclusion (not true .o linking yet).
@@ -30,24 +31,38 @@ def resolve_takes(prog: A.Program, base_dir: str, seen: set = None) -> A.Program
     parses it, and prepends its statements (excluding `take`s, which are
     resolved recursively). The `x` names are not filtered yet — whole
     module is included (like C #include).
+
+    v0.015: import cycles are REPORTED, not silently skipped. `seen`
+    tracks fully-loaded modules (diamond imports skip safely); `stack`
+    tracks modules currently being loaded — a take of a file on the
+    stack is a cycle and raises an error.
     """
     if seen is None:
         seen = set()
+    if stack is None:
+        stack = []
     new_stmts = []
     for stmt in prog.statements:
         if isinstance(stmt, A.Take):
             # Resolve module path to file
             mod_path = os.path.join(base_dir, *stmt.module) + ".orum"
+            if mod_path in stack:
+                cycle = " -> ".join(stack + [mod_path])
+                raise ValueError(f"import cycle detected: {cycle}")
             if mod_path in seen:
-                continue  # already loaded, avoid cycles
+                continue  # already fully loaded (diamond import), skip
             if not os.path.exists(mod_path):
                 raise FileNotFoundError(f"module not found: {mod_path} (for `take` from {stmt.module})")
             seen.add(mod_path)
-            with open(mod_path) as f:
-                mod_source = f.read()
-            mod_prog = Parser(Lexer(mod_source).tokenize()).parse_program()
-            # Recursively resolve takes in the module
-            mod_prog = resolve_takes(mod_prog, base_dir, seen)
+            stack.append(mod_path)
+            try:
+                with open(mod_path) as f:
+                    mod_source = f.read()
+                mod_prog = Parser(Lexer(mod_source).tokenize()).parse_program()
+                # Recursively resolve takes in the module
+                mod_prog = resolve_takes(mod_prog, base_dir, seen, stack)
+            finally:
+                stack.pop()
             # Prepend the module's statements (excluding its takes, already resolved)
             for ms in mod_prog.statements:
                 if not isinstance(ms, A.Take):
@@ -108,8 +123,15 @@ def compile_object(source: str, freestanding: bool = False) -> bytes:
     
     # Get relocations (undefined function calls)
     relocs = getattr(cg, 'obj_relocs', [])
-    
-    return objfile.write_object(symbols, relocs, text, rodata)
+
+    # rodata_refs: (text_pos, rodata_off) pairs from codegen — positions
+    # in .text where a 64-bit rodata address must be patched at link time.
+    # v0.015: stored in the object so the linker can resolve cross-object
+    # string/data references.
+    # data_refs: (text_pos, data_off) pairs — heap_ptr/heap_end references
+    # for the shared heap. v0.015: stored so the linker can point all
+    # objects at one shared data section.
+    return objfile.write_object(symbols, relocs, text, rodata, refs, data_refs)
 
 
 def build_binary(source: str, path: str, freestanding: bool = False,

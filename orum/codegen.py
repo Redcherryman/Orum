@@ -246,9 +246,18 @@ class Codegen:
         self.gen_heap_init()
         entry_fndef = self.entry_symbol in self.fn_labels
         if entry_fndef:
-            # Jump to the user-defined fn; its label is generated below.
-            # Use a placeholder that resolve() will patch.
-            self.e.jmp(self.fn_labels[self.entry_symbol])
+            # Call the user-defined fn, then exit with its return value
+            # (hosted) or halt (freestanding). A plain jmp would leave
+            # no return address, so the fn's ret would jump to garbage
+            # and segfault. v0.015 fix.
+            self.e.call(self.fn_labels[self.entry_symbol])
+            if self.freestanding:
+                self.gen_halt_loop()
+            else:
+                # exit(main's return value): rdi = rax, rax = 60, syscall
+                self.e.mov_rr(RDI, RAX)
+                self.e.mov_ri64(RAX, 60)
+                self.emit_syscall()
         else:
             top = [s for s in self.prog.statements
                    if not isinstance(s, (A.FnDef, A.StructDef))]
@@ -438,8 +447,15 @@ class Codegen:
         if isinstance(node, A.Binding):
             self.gen_binding(node)
         elif isinstance(node, A.Share):
-            # top-level share behaves like a binding
-            self.gen_binding(A.Binding(node.name, None, node.value, False))
+            # top-level share behaves like a binding. Carry the
+            # typechecker's inferred type onto the new Binding, or
+            # gen_binding fails reading node.inferred. v0.015 fix:
+            # this broke `take` of shared constants (the Share node
+            # has inferred, but the fresh Binding did not).
+            b = A.Binding(node.name, None, node.value, False)
+            if hasattr(node, 'inferred'):
+                b.inferred = node.inferred
+            self.gen_binding(b)
         elif isinstance(node, A.Take):
             self.gen_take(node)
         elif isinstance(node, A.Assign):
@@ -959,18 +975,27 @@ class Codegen:
             # Uses MS x64 convention (for UEFI). The pointer is in a local var.
             # Args: up to 4, passed in RCX, RDX, R8, R9.
             # TODO: support more than 4 args, System V convention for Orum-to-Orum.
+            # v0.015 fix (nested calls): previously args were evaluated
+            # directly into RCX/RDX/R8/R9 and the pointer loaded into R11
+            # BEFORE arg evaluation. A nested fn_ptr_call as an argument
+            # would clobber both the already-placed args (it uses the same
+            # registers) and R11 (it loads its own pointer there), so the
+            # outer call jumped to the wrong function. Now: evaluate all
+            # args onto the stack first, pop them into registers, THEN
+            # load the pointer into R11 just before the call.
             info = self.cur_vars[node.fn_ptr_name]
-            # Load fn pointer into R11 (caller-saved, safe)
-            e.mov_rm(R11, RBP, -info.off)
-            # Evaluate args and place in MS x64 registers
-            # Arg1 -> RCX, Arg2 -> RDX, Arg3 -> R8, Arg4 -> R9
             arg_regs = [RCX, RDX, R8, R9]
-            for i, arg in enumerate(node.args):
-                if i >= 4:
-                    raise self.err(getattr(node, "line", "?"),
-                                   "function pointer call supports max 4 args")
+            if len(node.args) > 4:
+                raise self.err(getattr(node, "line", "?"),
+                               "function pointer call supports max 4 args")
+            for arg in node.args:
                 self.gen_expr(arg)
-                e.mov_rr(arg_regs[i], RAX)
+                e.push_r(RAX)
+            for i in range(len(node.args) - 1, -1, -1):
+                e.pop_r(arg_regs[i])
+            # Load fn pointer into R11 (caller-saved, safe) AFTER args,
+            # so nested calls during arg evaluation can't clobber it.
+            e.mov_rm(R11, RBP, -info.off)
             # 32-byte shadow space, call, cleanup
             e.sub_ri(RSP, 32)
             e.call_reg(R11)
