@@ -1,13 +1,23 @@
+# struct_match.orum — Orum v0.013 example
+# Structs, integer-payload unions, string equality, and match arms.
+
 struct Point
 x: int
 y: int
 end
 
-fn magnitude(p: Point) -> int
-return p.x * p.x + p.y * p.y
+point = Point(x: 10, y: 20)
+say(point.x)
+
+fn load_value(source: str) -> int | int
+if source == "ok"
+return ok(10)
+else
+return err(20)
+end
 end
 
-mut p = Point { x: 3, y: 4 }
-match ok(p.x) | err(p.y)
-say(p.x + p.y)
+match load_value("nope")
+ok(value) -> say(value)
+err(problem) -> say(problem)
 end

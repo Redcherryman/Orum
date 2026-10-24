@@ -1,2 +1,7 @@
-take diameter from math.circle
-say(diameter)
+# use_circle.orum — Orum v0.013 import example
+# Imports the math.circle module from examples/math/circle.orum.
+# `take` currently includes all module declarations, not only listed shares.
+
+take pi_num, pi_den from math.circle
+
+say(10 * pi_num / pi_den)
