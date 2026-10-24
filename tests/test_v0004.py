@@ -303,24 +303,40 @@ class TestVolatility(unittest.TestCase):
     one load/store — never elided, merged, or reordered."""
 
     def _count_emitter_calls(self, src):
-        """Compile src, counting load_sized/store_sized emitter calls."""
+        """Compile src, counting load_sized/store_sized emitter calls.
+
+        Only user-code emission is counted: runtime helpers (e.g.
+        __fopen's internal byte copy) are out of scope — the volatility
+        guarantee is about source-level raw accesses."""
         from orum import x86
         from orum.codegen import Codegen
         from orum.typecheck import typecheck
         loads, stores = [], []
+        paused = [False]
         orig_load = x86.Emitter.load_sized
         orig_store = x86.Emitter.store_sized
+        orig_helpers = Codegen.gen_helpers
 
         def counting_load(self, dst, base, disp, size, signed):
-            loads.append((dst, base, disp, size, signed))
+            if not paused[0]:
+                loads.append((dst, base, disp, size, signed))
             return orig_load(self, dst, base, disp, size, signed)
 
         def counting_store(self, base, disp, size, src):
-            stores.append((base, disp, size, src))
+            if not paused[0]:
+                stores.append((base, disp, size, src))
             return orig_store(self, base, disp, size, src)
+
+        def scoped_helpers(self):
+            paused[0] = True
+            try:
+                return orig_helpers(self)
+            finally:
+                paused[0] = False
 
         x86.Emitter.load_sized = counting_load
         x86.Emitter.store_sized = counting_store
+        Codegen.gen_helpers = scoped_helpers
         try:
             prog = Parser(Lexer(src).tokenize()).parse_program()
             typecheck(prog)
@@ -328,6 +344,7 @@ class TestVolatility(unittest.TestCase):
         finally:
             x86.Emitter.load_sized = orig_load
             x86.Emitter.store_sized = orig_store
+            Codegen.gen_helpers = orig_helpers
         return loads, stores
 
     def test_lexical_reads_emit_n_loads(self):

@@ -1,0 +1,5 @@
+# math_circle.orum — Orum v0.001 example (file 1 of 2)
+# This file is module `math.circle`. It shares constants for others to take.
+
+share pi_num = 314
+share pi_den = 100

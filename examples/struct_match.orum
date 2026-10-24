@@ -1,23 +1,20 @@
-# struct_match.orum — Orum v0.013 example
-# Structs, integer-payload unions, string equality, and match arms.
+# struct_match.orum — Orum v0.001 example
+# Structs, error-as-value unions, and match with ok/err arms.
 
 struct Point
 x: int
 y: int
 end
 
-point = Point(x: 10, y: 20)
-say(point.x)
-
-fn load_value(source: str) -> int | int
+fn load_point(source: str) -> Point | str
 if source == "ok"
-return ok(10)
+return Point(x: 10, y: 20)
 else
-return err(20)
+return "bad source"
 end
 end
 
-match load_value("nope")
-ok(value) -> say(value)
-err(problem) -> say(problem)
+match load_point("nope")
+ok(p) -> say(p)
+err(e) -> crash e
 end
