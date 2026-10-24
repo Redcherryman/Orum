@@ -1,10 +1,2 @@
-# use_circle.orum — Orum v0.001 example (file 2 of 2)
-# Takes shared names from module `math.circle` (see math_circle.orum).
-
-take pi_num, pi_den from math.circle
-
-fn circ(diameter: int) -> int
-return diameter * pi_num / pi_den
-end
-
-say(circ(10))
+take diameter from math.circle
+say(diameter)
