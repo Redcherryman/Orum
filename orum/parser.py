@@ -48,6 +48,8 @@ from __future__ import annotations
 
 from . import ast_nodes as A
 from .lexer import Lexer, Token
+from .x86asm import AsmError as _AsmError
+from .x86asm import assemble_asm_body as _assemble_asm_body
 
 
 class ParseError(Exception):
@@ -74,6 +76,11 @@ class Parser:
     def peek2(self) -> Token:
         if self.pos + 1 < len(self.toks):
             return self.toks[self.pos + 1]
+        return self.toks[-1]  # EOF
+
+    def peek3(self) -> Token:
+        if self.pos + 2 < len(self.toks):
+            return self.toks[self.pos + 2]
         return self.toks[-1]  # EOF
 
     def advance(self) -> Token:
@@ -390,16 +397,29 @@ class Parser:
     def parse_asm_block(self) -> A.AsmBlock:
         """`asm` NEWLINE (directive NEWLINE)* `end`.
 
-        Directives (any order; emission is always in-moves, raw bytes,
+        Directives (any order; emission is always in-moves, body bytes,
         out-moves):
           in <var> = <reg>
           out <var> = <reg>
           clobber "<reg>"
           raw <byte>, <byte>, ...
+          <mnemonic> [operands]     (x86-64, assembled at parse time)
+          <label>:                  (block-local, own line)
+
+        A line starting with `in` / `out` is a directive only when it
+        matches `in|out <ident> = <ident>`; otherwise it is a mnemonic
+        (the x86 `in` / `out` port instructions). Mnemonic lines are
+        captured token-by-token and reassembled to text, so they may use
+        registers, immediates, memory operands, and labels. Labels must
+        sit on their own line.
         """
         self.expect("ASM")
         self.expect_newline("after 'asm'")
-        ins, outs, clobbers, raw_bytes = [], [], [], []
+        ins, outs, clobbers = [], [], []
+        # Ordered body items: ('raw', byte, lineno) | ('label', name,
+        # lineno) | ('mnem', text, lineno). Assembled to bytes at `end`
+        # so mnemonic lines and raw bytes interleave in source order.
+        body_items = []
         while True:
             self.skip_newlines()
             t = self.peek()
@@ -411,13 +431,20 @@ class Parser:
                     f"{t.line}:{t.col}: expected 'end' to close 'asm' block, "
                     f"got end of file"
                 )
-            if t.type == "IN":
+            # `in` / `out` are directives only as `in|out ident = ident`;
+            # otherwise they start an x86 mnemonic line (in/out ports).
+            is_directive = False
+            if t.type in ("IN", "OUT"):
+                if self.peek2().type == "IDENT" \
+                        and self.peek3().type == "ASSIGN":
+                    is_directive = True
+            if t.type == "IN" and is_directive:
                 self.advance()
                 var = self.expect("IDENT").value
                 self.expect("ASSIGN")
                 reg = self.expect("IDENT").value
                 ins.append(A.AsmIn(var, reg))
-            elif t.type == "OUT":
+            elif t.type == "OUT" and is_directive:
                 self.advance()
                 var = self.expect("IDENT").value
                 self.expect("ASSIGN")
@@ -437,17 +464,40 @@ class Parser:
                             f"{bt.line}:{bt.col}: asm raw byte out of "
                             f"range 0-255: {v}"
                         )
-                    raw_bytes.append(v)
+                    body_items.append(('raw', v, bt.line))
                     if self.peek().type == "COMMA":
                         self.advance()
                     else:
                         break
             else:
-                raise ParseError(
-                    f"{t.line}:{t.col}: expected 'in', 'out', 'clobber' or "
-                    f"'raw' inside 'asm' block, got '{t.value}'"
-                )
+                # Mnemonic line (or label): capture tokens to end of line
+                # and rebuild the text. Punctuation tokens carry the
+                # character as their value; INT tokens carry the integer
+                # (hex source becomes decimal text, which the assembler
+                # parses identically).
+                line_toks = []
+                while self.peek().type not in ("NEWLINE", "EOF"):
+                    line_toks.append(self.advance())
+                if not line_toks:
+                    raise ParseError(
+                        f"{t.line}:{t.col}: empty line inside 'asm' block"
+                    )
+                text = " ".join(str(tok.value) for tok in line_toks)
+                stripped = text.strip()
+                # A label is a lone identifier followed by ':'. Token
+                # joining inserts a space before the colon ("hlt_loop :"),
+                # so test the spaceless form.
+                nospace = stripped.replace(" ", "")
+                if nospace.endswith(":") and nospace[:-1].isidentifier():
+                    body_items.append(
+                        ('label', nospace[:-1], line_toks[0].line))
+                else:
+                    body_items.append(('mnem', text, line_toks[0].line))
             self.expect_newline("after asm directive")
+        try:
+            raw_bytes = list(_assemble_asm_body(body_items))
+        except _AsmError as e:
+            raise ParseError(str(e))
         return A.AsmBlock(ins, outs, clobbers, raw_bytes)
 
     # ------------------------------------------------------------------
